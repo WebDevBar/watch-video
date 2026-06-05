@@ -1,0 +1,333 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10,<3.13"
+# dependencies = [
+#   "faster-whisper>=1.1.0",
+#   "yt-dlp>=2025.1.1",
+#   "Pillow>=10.0",
+#   "numpy>=1.24",
+#   "pytesseract>=0.3.10",
+# ]
+# ///
+"""
+watch-video — turn a video (Loom / URL / local file) into something an LLM can read:
+a timestamped transcript + a deduplicated set of key frames (+ optional OCR of
+on-screen text). Built so a CLI coding agent (Claude Code, etc.) can "watch" a
+client's screen-recording and decipher it.
+
+Everything runs LOCALLY (yt-dlp + ffmpeg + faster-whisper + tesseract). No video or
+audio is sent to a cloud service — important when the recording contains private /
+financial data. The only thing that leaves your machine is whatever you (or your
+agent) later choose to read out of the output folder.
+
+Usage:
+    watch-video <loom-url | any-url | local-file> [options]
+
+Common options:
+    --out DIR                 output folder (default: ./watch-video-out/<slug>)
+    --model NAME              whisper model: tiny|base|small|medium|large-v3 (default: small)
+    --periodic SECONDS        sample a frame every N seconds (default: 4)
+    --scene-threshold FLOAT   extra frame on scene change, 0..1 (default: 0.08)
+    --max-frames N            cap kept frames (default: 200)
+    --dedupe-distance N       perceptual-hash hamming distance to treat frames as dupes (default: 6)
+    --no-ocr                  skip the tesseract OCR pass
+    --no-contact-sheet        skip the montage overview image
+    --cookies-from-browser B  pass private/team Loom auth via browser cookies (firefox|chrome|...)
+    --cookies FILE            pass a Netscape cookies.txt for yt-dlp
+    --language LANG           force transcription language (e.g. en); default = auto-detect
+
+Output folder contains: SUMMARY.md (read this first), transcript.md, transcript.txt,
+frames/*.jpg, frames/ocr/*.txt (if OCR), contact-sheet.jpg.
+"""
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+
+def eprint(*a):
+    print(*a, file=sys.stderr, flush=True)
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def have(binary):
+    return shutil.which(binary) is not None
+
+
+def slugify(text):
+    text = re.sub(r"^https?://", "", text)
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "-", text).strip("-")
+    return (text[:60] or "video").lower()
+
+
+def hms(seconds):
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
+
+
+# ---------------------------------------------------------------------------
+# 1. acquire the video (local file passthrough, else yt-dlp)
+# ---------------------------------------------------------------------------
+def acquire(source, out_dir, cookies_from_browser, cookies_file):
+    local = Path(source).expanduser()
+    if local.exists() and local.is_file():
+        eprint(f"[acquire] local file: {local}")
+        return local
+
+    if not have("yt-dlp"):
+        sys.exit("ERROR: yt-dlp not found. Install with: uv tool install yt-dlp")
+
+    target = out_dir / "source.%(ext)s"
+    cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "-f", "bv*+ba/b",            # best video+audio, merged by ffmpeg
+        "--merge-output-format", "mp4",
+        "-o", str(target),
+    ]
+    if cookies_from_browser:
+        cmd += ["--cookies-from-browser", cookies_from_browser]
+    if cookies_file:
+        cmd += ["--cookies", str(Path(cookies_file).expanduser())]
+    cmd.append(source)
+    eprint(f"[acquire] downloading via yt-dlp: {source}")
+    run(cmd)
+    mp4s = sorted(out_dir.glob("source.*"))
+    if not mp4s:
+        sys.exit("ERROR: yt-dlp produced no file (private link needs --cookies-from-browser?).")
+    return mp4s[0]
+
+
+# ---------------------------------------------------------------------------
+# 2. probe duration
+# ---------------------------------------------------------------------------
+def duration_seconds(video):
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", str(video)],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        return float(out)
+    except Exception:
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
+# 3. extract frames: first + periodic + scene-change, then perceptual dedupe
+# ---------------------------------------------------------------------------
+def extract_frames(video, frames_dir, periodic, scene_threshold):
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    select = (
+        f"select='eq(n\\,0)+gt(scene\\,{scene_threshold})+not(mod(t\\,{periodic}))',"
+        "showinfo"
+    )
+    info_log = frames_dir / "_showinfo.txt"
+    with open(info_log, "w") as log:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "info", "-i", str(video),
+             "-vf", select, "-vsync", "vfr", "-q:v", "2",
+             str(frames_dir / "%06d.jpg")],
+            check=True, stderr=log,
+        )
+    # map each emitted frame (in order) to its pts_time from showinfo
+    times = [float(m) for m in re.findall(r"pts_time:([0-9.]+)", info_log.read_text())]
+    frames = sorted(frames_dir.glob("[0-9]*.jpg"))
+    return list(zip(frames, times + [0.0] * (len(frames) - len(times))))
+
+
+def dhash(path, size=8):
+    from PIL import Image
+    import numpy as np
+    img = Image.open(path).convert("L").resize((size + 1, size), Image.LANCZOS)
+    arr = np.asarray(img, dtype=np.int16)
+    diff = arr[:, 1:] > arr[:, :-1]
+    bits = 0
+    for b in diff.flatten():
+        bits = (bits << 1) | int(b)
+    return bits
+
+
+def hamming(a, b):
+    return bin(a ^ b).count("1")
+
+
+def dedupe(frame_times, distance, max_frames):
+    kept, last_hash = [], None
+    for path, t in frame_times:
+        h = dhash(path)
+        if last_hash is not None and hamming(h, last_hash) < distance:
+            path.unlink(missing_ok=True)      # drop near-duplicate
+            continue
+        kept.append((path, t))
+        last_hash = h
+    # enforce cap by uniform thinning (keep first/last, sample the middle)
+    if len(kept) > max_frames:
+        step = len(kept) / max_frames
+        idx = sorted({0, len(kept) - 1, *(int(i * step) for i in range(max_frames))})
+        keepset = {kept[i][0] for i in idx}
+        for path, _ in kept:
+            if path not in keepset:
+                path.unlink(missing_ok=True)
+        kept = [(p, t) for p, t in kept if p in keepset]
+    # renumber kept frames sequentially with their timestamp baked into the name
+    renamed = []
+    for i, (path, t) in enumerate(kept):
+        new = path.with_name(f"frame_{i:03d}_{hms(t).replace(':', 'm')}s.jpg")
+        path.rename(new)
+        renamed.append((new, t))
+    return renamed
+
+
+# ---------------------------------------------------------------------------
+# 4. transcribe with faster-whisper (local, CPU int8 by default)
+# ---------------------------------------------------------------------------
+def transcribe(video, out_dir, model_name, language):
+    from faster_whisper import WhisperModel
+    eprint(f"[transcribe] loading whisper '{model_name}' (CPU/int8; first run downloads the model)…")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    segments, info = model.transcribe(str(video), language=language, vad_filter=True)
+    md, txt = [], []
+    for seg in segments:
+        stamp = hms(seg.start)
+        line = seg.text.strip()
+        md.append(f"- **[{stamp}]** {line}")
+        txt.append(line)
+    (out_dir / "transcript.md").write_text(
+        f"# Transcript ({model_name}, lang={info.language})\n\n" + "\n".join(md) + "\n"
+    )
+    (out_dir / "transcript.txt").write_text("\n".join(txt) + "\n")
+    return info.language, len(md)
+
+
+# ---------------------------------------------------------------------------
+# 5. OCR each kept frame (optional; financial numbers shown on screen)
+# ---------------------------------------------------------------------------
+def ocr_frames(frames, frames_dir):
+    import pytesseract
+    from PIL import Image
+    ocr_dir = frames_dir / "ocr"
+    ocr_dir.mkdir(exist_ok=True)
+    combined = []
+    for path, t in frames:
+        text = pytesseract.image_to_string(Image.open(path)).strip()
+        (ocr_dir / (path.stem + ".txt")).write_text(text)
+        if text:
+            combined.append(f"### {path.name} (@ {hms(t)})\n{text}\n")
+    (frames_dir / "ocr-combined.md").write_text("\n".join(combined) + "\n")
+    return ocr_dir
+
+
+# ---------------------------------------------------------------------------
+# 6. contact sheet montage (overview)
+# ---------------------------------------------------------------------------
+def contact_sheet(frames, out_path, cols=4, thumb_w=480):
+    from PIL import Image, ImageDraw
+    if not frames:
+        return None
+    thumbs = []
+    for path, t in frames:
+        im = Image.open(path).convert("RGB")
+        ratio = thumb_w / im.width
+        im = im.resize((thumb_w, int(im.height * ratio)))
+        d = ImageDraw.Draw(im)
+        label = hms(t)
+        d.rectangle([0, 0, 8 + 8 * len(label), 18], fill=(0, 0, 0))
+        d.text((4, 3), label, fill=(255, 255, 255))
+        thumbs.append(im)
+    rows = (len(thumbs) + cols - 1) // cols
+    cell_h = max(t.height for t in thumbs)
+    sheet = Image.new("RGB", (cols * thumb_w, rows * cell_h), (20, 20, 20))
+    for i, im in enumerate(thumbs):
+        sheet.paste(im, ((i % cols) * thumb_w, (i // cols) * cell_h))
+    sheet.save(out_path, quality=85)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+def main():
+    p = argparse.ArgumentParser(prog="watch-video", description="Video → transcript + key frames for an LLM.")
+    p.add_argument("source", help="Loom/any URL, or a local video file")
+    p.add_argument("--out")
+    p.add_argument("--model", default="small")
+    p.add_argument("--periodic", type=float, default=4)
+    p.add_argument("--scene-threshold", type=float, default=0.08)
+    p.add_argument("--max-frames", type=int, default=200)
+    p.add_argument("--dedupe-distance", type=int, default=6)
+    p.add_argument("--no-ocr", action="store_true")
+    p.add_argument("--no-contact-sheet", action="store_true")
+    p.add_argument("--cookies-from-browser")
+    p.add_argument("--cookies")
+    p.add_argument("--language")
+    args = p.parse_args()
+
+    if not have("ffmpeg"):
+        sys.exit("ERROR: ffmpeg not found (sudo dnf install ffmpeg).")
+
+    out_dir = Path(args.out).expanduser() if args.out else Path.cwd() / "watch-video-out" / slugify(args.source)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir = out_dir / "frames"
+    eprint(f"[watch-video] output → {out_dir}")
+
+    video = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
+    dur = duration_seconds(video)
+
+    eprint("[frames] extracting (first + scene-change + periodic)…")
+    raw = extract_frames(video, frames_dir, args.periodic, args.scene_threshold)
+    kept = dedupe(raw, args.dedupe_distance, args.max_frames)
+    eprint(f"[frames] {len(raw)} extracted → {len(kept)} kept after dedupe")
+
+    lang, n_seg = transcribe(video, out_dir, args.model, args.language)
+
+    do_ocr = (not args.no_ocr) and have("tesseract")
+    if not args.no_ocr and not have("tesseract"):
+        eprint("[ocr] tesseract not found — skipping OCR (sudo dnf install tesseract).")
+    if do_ocr:
+        eprint(f"[ocr] reading on-screen text from {len(kept)} frames…")
+        ocr_frames(kept, frames_dir)
+
+    sheet = None
+    if not args.no_contact_sheet:
+        sheet = contact_sheet(kept, out_dir / "contact-sheet.jpg")
+
+    # SUMMARY.md — the entry point an agent reads first
+    lines = [
+        f"# watch-video result — {slugify(args.source)}",
+        "",
+        f"- **Source:** `{args.source}`",
+        f"- **Duration:** {hms(dur)}",
+        f"- **Frames kept:** {len(kept)} (deduped from {len(raw)})",
+        f"- **Transcript:** {n_seg} segments, language `{lang}`",
+        f"- **OCR:** {'yes → frames/ocr-combined.md' if do_ocr else 'no'}",
+        f"- **Contact sheet:** {'contact-sheet.jpg' if sheet else 'none'}",
+        "",
+        "## How to read this (for an LLM/agent)",
+        "1. Read `transcript.md` for what was said (timestamped).",
+        "2. Skim `contact-sheet.jpg`, then open individual `frames/*.jpg` for detail.",
+        "3. For exact on-screen numbers, cross-check `frames/ocr-combined.md` against the frame image"
+        " (OCR can misread; the image is ground truth).",
+        "",
+        "> ⚠️ This folder may contain private/financial client data — do not commit it.",
+        "",
+        "## Frames",
+    ]
+    for path, t in kept:
+        lines.append(f"- `frames/{path.name}` @ {hms(t)}")
+    (out_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
+
+    eprint(f"\n[done] {out_dir}/SUMMARY.md")
+    print(str(out_dir / "SUMMARY.md"))
+
+
+if __name__ == "__main__":
+    main()

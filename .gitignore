@@ -1,0 +1,10 @@
+# Output folders contain private/financial client data — NEVER commit
+watch-video-out/
+*-out/
+# downloaded sources / models / caches
+*.mp4
+*.mkv
+*.webm
+*.m4a
+__pycache__/
+*.pyc
