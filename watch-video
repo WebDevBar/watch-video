@@ -490,6 +490,8 @@ def main():
     p.add_argument("--no-timeline", action="store_true")
     p.add_argument("--no-source", action="store_true")
     p.add_argument("--ocr-tuned", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="allow writing into a non-empty directory not created by watch-video")
     p.add_argument("--cookies-from-browser")
     p.add_argument("--cookies")
     p.add_argument("--language")
@@ -511,10 +513,18 @@ def main():
         sys.exit("ERROR: ffmpeg not found (sudo dnf install ffmpeg).")
 
     out_dir = Path(args.out).expanduser() if args.out else Path.cwd() / "watch-video-out" / slugify(args.source)
+    # Determine ownership + emptiness BEFORE we create/write anything, so we never clobber
+    # or later --clean a user's pre-existing directory that we don't own.
+    dir_was_ours = is_watch_video_dir(out_dir)   # validates the manifest signature, not just presence
+    if out_dir.exists() and any(out_dir.iterdir()) and not dir_was_ours and not args.force:
+        sys.exit(
+            f"ERROR: --out '{out_dir}' is a non-empty directory not created by watch-video.\n"
+            "Refusing to write frames/transcript/etc. into it (a later --clean could remove your\n"
+            "files). Choose a new/empty --out, or pass --force to override."
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     frames_dir = out_dir / "frames"
     eprint(f"[watch-video] output → {out_dir}")
-    dir_was_ours = is_watch_video_dir(out_dir)   # validates the manifest signature, not just presence
 
     video, was_downloaded = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
     write_manifest(out_dir, args.source, Path(video).name if was_downloaded else None)
