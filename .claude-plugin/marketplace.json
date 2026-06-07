@@ -1,0 +1,11 @@
+{
+  "name": "watch-video",
+  "owner": {"name": "webdevbar"},
+  "plugins": [
+    {
+      "name": "watch-video",
+      "source": "./",
+      "description": "Watch a video/Loom into transcript + frames + OCR (local-first)."
+    }
+  ]
+}
