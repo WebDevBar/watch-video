@@ -54,9 +54,11 @@ from datetime import datetime, timezone, timedelta
 WATCH_VIDEO_VERSION = "1.1.0"
 
 
-def write_manifest(out_dir, source):
+def write_manifest(out_dir, source, downloaded_name=None):
     """Write the hidden ownership marker every cleanup operation validates.
-    Preserves an existing valid manifest's `created` so re-runs don't reset run age."""
+    Preserves an existing valid manifest's `created` so re-runs don't reset run age.
+    Records `downloaded_source` (the basename watch-video downloaded) so cleanup deletes
+    only OUR source file, never a user's pre-existing source.*."""
     mf = out_dir / ".watch-video.json"
     created = None
     if mf.is_file():
@@ -70,6 +72,7 @@ def write_manifest(out_dir, source):
         "tool": "watch-video",
         "version": WATCH_VIDEO_VERSION,
         "source": str(source),
+        "downloaded_source": downloaded_name,
         "created": created or datetime.now(timezone.utc).isoformat(),
     }
     mf.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -385,10 +388,17 @@ def remove_wv_artifacts(d):
     Never blanket-deletes the folder: if the user pointed --out at a folder containing
     their own files, those survive and the folder is left in place."""
     d = Path(d)
+    downloaded = None
+    try:
+        m = json.loads((d / ".watch-video.json").read_text())
+        if m.get("tool") == "watch-video":
+            downloaded = m.get("downloaded_source")
+    except Exception:
+        downloaded = None
     for name in WV_ARTIFACT_NAMES:
         (d / name).unlink(missing_ok=True)
-    for s in d.glob("source.*"):       # the downloaded source video, if kept
-        s.unlink(missing_ok=True)
+    if downloaded:
+        (d / downloaded).unlink(missing_ok=True)   # only the file WE downloaded, by recorded name
     frames = d / "frames"
     if frames.exists():
         (frames / "ocr-combined.md").unlink(missing_ok=True)
@@ -503,9 +513,9 @@ def main():
     frames_dir = out_dir / "frames"
     eprint(f"[watch-video] output → {out_dir}")
     dir_was_ours = is_watch_video_dir(out_dir)   # validates the manifest signature, not just presence
-    write_manifest(out_dir, args.source)
 
     video, was_downloaded = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
+    write_manifest(out_dir, args.source, Path(video).name if was_downloaded else None)
     dur = duration_seconds(video)
 
     do_transcribe = not args.no_transcribe
