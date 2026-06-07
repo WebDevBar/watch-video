@@ -398,7 +398,9 @@ def remove_wv_artifacts(d):
     for name in WV_ARTIFACT_NAMES:
         (d / name).unlink(missing_ok=True)
     if downloaded:
-        (d / downloaded).unlink(missing_ok=True)   # only the file WE downloaded, by recorded name
+        cand = d / Path(downloaded).name           # basename only — never escape d via ../ or abs path
+        if cand.parent.resolve() == d.resolve():
+            cand.unlink(missing_ok=True)
     frames = d / "frames"
     if frames.exists():
         (frames / "ocr-combined.md").unlink(missing_ok=True)
