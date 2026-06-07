@@ -238,10 +238,23 @@ def transcribe(video, out_dir, model_name, language):
     return info.language, segments_out
 
 
+def _prep_for_ocr(img):
+    """Upscale + grayscale + threshold a frame for sharper on-screen-text OCR."""
+    from PIL import Image
+    import numpy as np
+    if img.width < 1000:
+        scale = 1000 / img.width
+        img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+    gray = np.asarray(img.convert("L"))
+    thresh = gray.mean()
+    bw = (gray > thresh).astype("uint8") * 255
+    return Image.fromarray(bw)
+
+
 # ---------------------------------------------------------------------------
 # 5. OCR each kept frame (optional; financial numbers shown on screen)
 # ---------------------------------------------------------------------------
-def ocr_frames(frames, frames_dir):
+def ocr_frames(frames, frames_dir, tuned=False):
     import pytesseract
     from PIL import Image
     ocr_dir = frames_dir / "ocr"
@@ -249,7 +262,12 @@ def ocr_frames(frames, frames_dir):
     combined = []
     ocr_map = {}
     for path, t in frames:
-        text = pytesseract.image_to_string(Image.open(path)).strip()
+        im = Image.open(path)
+        if tuned:
+            im = _prep_for_ocr(im)
+            text = pytesseract.image_to_string(im, config="--psm 6").strip()
+        else:
+            text = pytesseract.image_to_string(im).strip()
         ocr_map[path] = text
         (ocr_dir / (path.stem + ".txt")).write_text(text)
         if text:
@@ -428,6 +446,7 @@ def main():
     p.add_argument("--no-contact-sheet", action="store_true")
     p.add_argument("--no-timeline", action="store_true")
     p.add_argument("--no-source", action="store_true")
+    p.add_argument("--ocr-tuned", action="store_true")
     p.add_argument("--cookies-from-browser")
     p.add_argument("--cookies")
     p.add_argument("--language")
@@ -483,7 +502,7 @@ def main():
     ocr_map = {}
     if do_ocr:
         eprint(f"[ocr] reading on-screen text from {len(kept)} frames…")
-        ocr_map = ocr_frames(kept, frames_dir)
+        ocr_map = ocr_frames(kept, frames_dir, tuned=args.ocr_tuned)
 
     sheet = None
     if not args.no_contact_sheet:
