@@ -224,17 +224,18 @@ def transcribe(video, out_dir, model_name, language):
     eprint(f"[transcribe] loading whisper '{model_name}' (CPU/int8; first run downloads the model)…")
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(str(video), language=language, vad_filter=True)
-    md, txt = [], []
+    md, txt, segments_out = [], [], []
     for seg in segments:
         stamp = hms(seg.start)
         line = seg.text.strip()
         md.append(f"- **[{stamp}]** {line}")
         txt.append(line)
+        segments_out.append((seg.start, line))
     (out_dir / "transcript.md").write_text(
         f"# Transcript ({model_name}, lang={info.language})\n\n" + "\n".join(md) + "\n"
     )
     (out_dir / "transcript.txt").write_text("\n".join(txt) + "\n")
-    return info.language, len(md)
+    return info.language, segments_out
 
 
 # ---------------------------------------------------------------------------
@@ -317,10 +318,11 @@ def main():
     eprint(f"[frames] {len(raw)} extracted → {len(kept)} kept after dedupe")
 
     if args.no_transcribe:
-        lang, n_seg = "skipped", 0
+        lang, segments = "skipped", []
         eprint("[transcribe] skipped (--no-transcribe)")
     else:
-        lang, n_seg = transcribe(video, out_dir, args.model, args.language)
+        lang, segments = transcribe(video, out_dir, args.model, args.language)
+    n_seg = len(segments)
 
     do_ocr = (not args.no_ocr) and have("tesseract")
     if not args.no_ocr and not have("tesseract"):
