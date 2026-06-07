@@ -510,7 +510,7 @@ def main():
         p.error("source is required unless --clean/--clean-older-than is given")
 
     if not have("ffmpeg"):
-        sys.exit("ERROR: ffmpeg not found (sudo dnf install ffmpeg).")
+        sys.exit("ERROR: ffmpeg not found. Install it via scripts/setup.py, or brew/apt/dnf/winget.")
 
     out_dir = Path(args.out).expanduser() if args.out else Path.cwd() / "watch-video-out" / slugify(args.source)
     # Determine ownership + emptiness BEFORE we create/write anything, so we never clobber
@@ -551,7 +551,7 @@ def main():
 
     do_ocr = (not args.no_ocr) and have("tesseract")
     if not args.no_ocr and not have("tesseract"):
-        eprint("[ocr] tesseract not found — skipping OCR (sudo dnf install tesseract).")
+        eprint("[ocr] tesseract not found — skipping OCR (install via scripts/setup.py, or brew/apt/dnf/winget).")
     ocr_map = {}
     if do_ocr:
         eprint(f"[ocr] reading on-screen text from {len(kept)} frames…")

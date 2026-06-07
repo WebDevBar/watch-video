@@ -20,8 +20,10 @@ upload them.
 Required: `uv`, `ffmpeg`. Optional: `tesseract` (OCR). Run
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py"` once to install them (it attempts the
 official `uv` installer + your OS package manager for ffmpeg; tesseract is best-effort),
-or preinstall manually. If `uv`'s installer lands it outside your `PATH`, add its dir to
-`PATH` and re-run.
+or preinstall manually. On **Windows** use `python` or `py` if `python3` isn't found. If
+`uv`'s installer lands it outside your `PATH`, add its dir to `PATH` and re-run.
+(Once `uv` is present, the wrapper above is run via `uv run`, which works on
+Linux/macOS/Windows without assuming a `python3` on PATH.)
 
 ## Invocation
 Installed as a Claude Code plugin, this is invoked **namespaced** as
@@ -33,7 +35,7 @@ Codex / manual skill installs, run the wrapper from the skill's own directory.
 The command runs the wrapper (which runs the bundled CLI and prints the output dir):
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" <url|file> [--no-ocr] [--no-timeline] [--model small] [--ephemeral]
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" <url|file> [--no-ocr] [--no-timeline] [--model small] [--ephemeral]
 ```
 
 The wrapper prints exactly one line: the **output directory**.
@@ -47,12 +49,12 @@ The wrapper prints exactly one line: the **output directory**.
 
 ## Ephemeral mode (two steps — delete after reading)
 `--ephemeral` does NOT auto-delete (the CLI exits before you read). Do this:
-1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" <src> --ephemeral` → note the printed output dir.
+1. Run `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" <src> --ephemeral` → note the printed output dir.
 2. After you have read the artifacts, run
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" --clean <output-dir>` to delete them.
+   `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" --clean <output-dir>` to delete them.
 
 ## Cleanup
-- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" --clean <slug|path>` — delete one run's folder.
+- `uv run "${CLAUDE_PLUGIN_ROOT}/scripts/watch-run.py" --clean <slug|path>` — delete one run's folder.
 - `... --clean all` — delete all watch-video folders under `./watch-video-out/`.
 - `... --clean-older-than 7` — delete folders older than 7 days.
 Cleanup only deletes folders carrying a valid `.watch-video.json` marker.

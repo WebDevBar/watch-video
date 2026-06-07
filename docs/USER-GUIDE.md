@@ -3,6 +3,12 @@
 A step-by-step guide to installing and using `watch-video`, both as an agent plugin and
 as a command-line tool. For the project overview see the [README](../README.md).
 
+> **Platforms.** Linux and macOS are supported. Windows should work (the plugin runs the
+> tool via `uv run`, no `python3`-on-PATH assumption) but isn't maintainer-tested — see
+> the README's *Platform support* table. On Windows, the CLI examples below that start
+> with `./watch-video …` should be run as `uv run --script watch-video …`, and use
+> `python`/`py` if `python3` isn't found. The Bash test/build scripts need Git Bash or WSL.
+
 ## 1. Install the dependencies
 
 `watch-video` needs **`uv`** and **`ffmpeg`** (required) and **`tesseract`** (optional,
