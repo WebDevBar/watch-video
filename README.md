@@ -36,22 +36,12 @@ Key options: `--out`, `--model tiny|base|small|medium|large-v3` (default `small`
 - Pinned to **Python 3.10–3.12** (faster-whisper/ctranslate2 wheels; 3.13+ may lack
   wheels). `uv python install 3.12` if uv can't find one.
 
-## Transcription backend — caveats & upgrade paths
+## Transcription backend
 
-v1 uses **`faster-whisper` on CPU (int8)**. Fine for occasional few-minute videos;
-a multi-minute Loom transcribes in well under real-time on a modern CPU.
-
-- **CPU (default):** zero GPU setup, fully portable. Slower on long videos — bump to a
-  smaller `--model` (`base`/`tiny`) if needed, or accept the wait.
-- **NVIDIA / CUDA:** `faster-whisper` supports CUDA out of the box. With an NVIDIA GPU,
-  set `device="cuda"`, `compute_type="float16"` in `transcribe()` (or expose a
-  `--device` flag) for a ~4× speedup. Needs CUDA + cuDNN libs.
-- **AMD (ROCm) / Apple Silicon / cross-vendor GPU:** `faster-whisper` (CTranslate2) has
-  **no ROCm or Metal** path — it runs CPU-only on AMD/Mac. For GPU there, swap the
-  backend to **`whisper.cpp` with Vulkan** (works on AMD RDNA, Intel, NVIDIA) or Metal
-  (Apple). This is why the backend is kept isolated in `transcribe()` — it's a
-  drop-in swap, not a rewrite. (This machine is AMD RDNA4 → CPU now, whisper.cpp+Vulkan
-  is the future GPU path.)
+v1 uses **`faster-whisper` on CPU (int8)** — zero GPU setup, fully portable. The
+backend is isolated in one `transcribe()` function so it's a drop-in swap to
+CUDA (NVIDIA, ~4×) or **whisper.cpp + Vulkan** (AMD/Intel GPU). Full caveats and
+upgrade paths: [`docs/TRANSCRIPTION-BACKENDS.md`](docs/TRANSCRIPTION-BACKENDS.md).
 
 ## Privacy
 
@@ -63,11 +53,18 @@ output/transcripts.
 
 ## Status / future
 
-**Not yet published** — internal tool. When we package it for release, use
-[`mathiaschu/watch`](https://github.com/mathiaschu/watch) as the **template** for the
-releasable form: it already solved native **Claude Code skill/plugin packaging** (so the
-agent invokes it and gets frames+transcript directly in-context, instead of running the
-CLI and reading the output folder) and the marketplace `.skill` layout. Fold that
-packaging in, keep our OCR + faster-whisper + dedupe edge. (Decision to build vs adopt
-was peer-reviewed with Codex — no popular maintained tool fits the local + Loom-native +
-financial-OCR requirements; the 1763★ option is cloud-transcription.)
+**Not yet published** — internal tool. The plan is to package it as a native
+Claude Code skill/plugin so the agent invokes it and gets frames + transcript
+directly in-context, reusing the packaging two existing plugins already solved
+while keeping our OCR + faster-whisper + dedupe edge.
+
+## Docs
+
+- [`docs/WHY.md`](docs/WHY.md) — why this exists (privacy, Loom-native,
+  financial-OCR) and what it adds over similar plugins.
+- [`docs/REFERENCE-PLUGINS.md`](docs/REFERENCE-PLUGINS.md) — similar plugins to
+  draw packaging knowledge from (`mathiaschu/watch`, `bradautomates/claude-video`).
+- [`docs/PACKAGING.md`](docs/PACKAGING.md) — plan/target layout for the
+  skill/plugin form (open questions land in the upcoming spec).
+- [`docs/TRANSCRIPTION-BACKENDS.md`](docs/TRANSCRIPTION-BACKENDS.md) — CPU/CUDA/
+  Vulkan caveats and upgrade paths.
