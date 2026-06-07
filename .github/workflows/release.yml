@@ -1,7 +1,8 @@
 name: release
 on:
   push:
-    tags: ["v*"]
+    # `claude plugin tag` creates `<name>--v<version>`; also accept plain `v*`.
+    tags: ["*--v*", "v*"]
 jobs:
   build:
     runs-on: ubuntu-latest
