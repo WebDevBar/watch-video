@@ -48,6 +48,33 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import json
+from datetime import datetime, timezone, timedelta
+
+WATCH_VIDEO_VERSION = "1.1.0"
+
+
+def write_manifest(out_dir, source):
+    """Write the hidden ownership marker every cleanup operation validates."""
+    manifest = {
+        "tool": "watch-video",
+        "version": WATCH_VIDEO_VERSION,
+        "source": str(source),
+        "created": datetime.now(timezone.utc).isoformat(),
+    }
+    (out_dir / ".watch-video.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def is_watch_video_dir(path):
+    """True only if path holds a .watch-video.json whose SIGNATURE validates — not mere
+    filename presence. The single ownership gate used by reconciliation AND cleanup."""
+    mf = Path(path) / ".watch-video.json"
+    if not mf.is_file():
+        return False
+    try:
+        return json.loads(mf.read_text()).get("tool") == "watch-video"
+    except Exception:
+        return False
 
 
 def eprint(*a):
@@ -269,6 +296,7 @@ def main():
     p.add_argument("--cookies-from-browser")
     p.add_argument("--cookies")
     p.add_argument("--language")
+    p.add_argument("--no-transcribe", action="store_true")
     args = p.parse_args()
 
     if not have("ffmpeg"):
@@ -278,6 +306,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     frames_dir = out_dir / "frames"
     eprint(f"[watch-video] output → {out_dir}")
+    write_manifest(out_dir, args.source)
 
     video = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
     dur = duration_seconds(video)
@@ -287,7 +316,11 @@ def main():
     kept = dedupe(raw, args.dedupe_distance, args.max_frames)
     eprint(f"[frames] {len(raw)} extracted → {len(kept)} kept after dedupe")
 
-    lang, n_seg = transcribe(video, out_dir, args.model, args.language)
+    if args.no_transcribe:
+        lang, n_seg = "skipped", 0
+        eprint("[transcribe] skipped (--no-transcribe)")
+    else:
+        lang, n_seg = transcribe(video, out_dir, args.model, args.language)
 
     do_ocr = (not args.no_ocr) and have("tesseract")
     if not args.no_ocr and not have("tesseract"):
