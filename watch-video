@@ -51,7 +51,7 @@ from pathlib import Path
 import json
 from datetime import datetime, timezone, timedelta
 
-WATCH_VIDEO_VERSION = "1.1.0"
+WATCH_VIDEO_VERSION = "1.1.1"
 
 
 def write_manifest(out_dir, source, downloaded_name=None):

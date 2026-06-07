@@ -19,7 +19,7 @@ agent runs it for you and reads the result).
 > **Everything runs locally** — `yt-dlp` + `ffmpeg` + `faster-whisper` + `tesseract`.
 > No video or audio is sent to any cloud service. This is the whole point: recordings
 > often contain private or financial data.
-> Version: **1.1.0** · License: MIT
+> Version: **1.1.1** · License: MIT
 
 ---
 
