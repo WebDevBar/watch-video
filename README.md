@@ -85,9 +85,11 @@ python3 scripts/setup.py --check  # verify only, no install
 | **macOS** | ✅ Supported | `setup.py` uses Homebrew; all deps available. All paths are POSIX. |
 | **Windows** (incl. Claude CLI in PowerShell) | ⚠️ Should work — not yet tested | The plugin invokes the tool through **`uv run`** (the one required dep), so it does **not** depend on a `python3` on PATH, and all paths use `pathlib`. `uv`, `ffmpeg`, `tesseract`, `yt-dlp`, and `faster-whisper` all have Windows builds (`setup.py` uses `winget`). Two caveats: (1) run the bare CLI as `uv run --script watch-video …` — the `./watch-video` shebang form is POSIX-only; (2) the **dev** scripts `tests/*.sh` and `scripts/build-skill.sh` are Bash, so they need **Git Bash or WSL** (end users don't run these). |
 
-> macOS and Windows are expected to work but have **not been smoke-tested by the
-> maintainers** — please report issues. The plugin install/run path is built on `uv` +
-> `pathlib` specifically to be cross-platform.
+> **⚠️ Windows has not been tested.** The plugin install/run path is built on `uv` +
+> `pathlib` specifically to be cross-platform, and Windows *should* work, but the
+> maintainers have not verified it (macOS is also not maintainer-smoke-tested). **If you
+> hit any issue on Windows (or macOS), please [open an issue](https://github.com/WebDevBar/watch-video/issues)
+> and we'll try to address it.**
 
 ### A. As a Claude Code plugin (recommended for agents)
 
