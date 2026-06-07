@@ -330,10 +330,80 @@ def reconcile_stale(out_dir, frames_dir, dir_was_ours, do_transcribe, do_timelin
                 f.unlink(missing_ok=True)
 
 
+def manifest_created(path):
+    try:
+        data = json.loads((Path(path) / ".watch-video.json").read_text())
+        return datetime.fromisoformat(data["created"])
+    except Exception:
+        return None
+
+
+def _looks_like_path(arg):
+    return ("/" in arg) or ("\\" in arg) or Path(arg).is_absolute()
+
+
+# The exact set of files/dirs watch-video creates in an output folder.
+WV_ARTIFACT_NAMES = ("SUMMARY.md", "transcript.md", "transcript.txt", "timeline.md",
+                     "contact-sheet.jpg", ".watch-video.json")
+
+
+def remove_wv_artifacts(d):
+    """Delete ONLY watch-video's own artifacts in d, then rmdir d if it is now empty.
+    Never blanket-deletes the folder: if the user pointed --out at a folder containing
+    their own files, those survive and the folder is left in place."""
+    d = Path(d)
+    for name in WV_ARTIFACT_NAMES:
+        (d / name).unlink(missing_ok=True)
+    for s in d.glob("source.*"):       # the downloaded source video, if kept
+        s.unlink(missing_ok=True)
+    frames = d / "frames"
+    if frames.exists():
+        shutil.rmtree(frames, ignore_errors=True)   # frames/ is entirely watch-video-created
+    try:
+        d.rmdir()                      # removes the folder ONLY if nothing else remains
+        return True
+    except OSError:
+        eprint(f"[clean] {d}: removed watch-video artifacts; folder kept (contains other files)")
+        return False
+
+
+def do_clean(clean_arg, older_than, base):
+    targets, skipped = [], []
+    if older_than is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than)
+        if base.exists():
+            for d in sorted(p for p in base.iterdir() if p.is_dir()):
+                created = manifest_created(d)
+                if is_watch_video_dir(d) and created is not None and created < cutoff:
+                    targets.append(d)
+                else:
+                    skipped.append(d)
+    elif clean_arg == "all":
+        if base.exists():
+            for d in sorted(p for p in base.iterdir() if p.is_dir()):
+                (targets if is_watch_video_dir(d) else skipped).append(d)
+    elif clean_arg and _looks_like_path(clean_arg):
+        d = Path(clean_arg).expanduser()
+        (targets if is_watch_video_dir(d) else skipped).append(d)
+    elif clean_arg:  # bare token -> slug under base
+        d = base / clean_arg
+        (targets if is_watch_video_dir(d) else skipped).append(d)
+    for d in targets:
+        removed = remove_wv_artifacts(d)
+        eprint(f"[clean] {'deleted' if removed else 'cleaned (folder kept)'} {d}")
+    for d in skipped:
+        eprint(f"[clean] skipped (no valid watch-video manifest) {d}")
+    return targets, skipped
+
+
 # ---------------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser(prog="watch-video", description="Video → transcript + key frames for an LLM.")
-    p.add_argument("source", help="Loom/any URL, or a local video file")
+    p.add_argument("source", nargs="?", help="Loom/any URL, or a local video file")
+    p.add_argument("--clean", metavar="SLUG|PATH|all",
+                   help="janitorial: delete a watch-video output folder and exit")
+    p.add_argument("--clean-older-than", type=int, metavar="DAYS",
+                   help="janitorial: delete watch-video folders older than DAYS and exit")
     p.add_argument("--out")
     p.add_argument("--model", default="small")
     p.add_argument("--periodic", type=float, default=4)
@@ -348,6 +418,17 @@ def main():
     p.add_argument("--language")
     p.add_argument("--no-transcribe", action="store_true")
     args = p.parse_args()
+
+    if args.clean is not None and args.clean_older_than is not None:
+        p.error("--clean and --clean-older-than are mutually exclusive")
+    if args.clean_older_than is not None and args.clean_older_than < 0:
+        p.error("--clean-older-than DAYS must be >= 0")
+    if args.clean is not None or args.clean_older_than is not None:
+        base = Path.cwd() / "watch-video-out"
+        do_clean(args.clean, args.clean_older_than, base)
+        return
+    if not args.source:
+        p.error("source is required unless --clean/--clean-older-than is given")
 
     if not have("ffmpeg"):
         sys.exit("ERROR: ffmpeg not found (sudo dnf install ffmpeg).")
