@@ -8,3 +8,4 @@ watch-video-out/
 *.m4a
 __pycache__/
 *.pyc
+dist/
