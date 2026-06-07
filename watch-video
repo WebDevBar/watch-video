@@ -247,13 +247,15 @@ def ocr_frames(frames, frames_dir):
     ocr_dir = frames_dir / "ocr"
     ocr_dir.mkdir(exist_ok=True)
     combined = []
+    ocr_map = {}
     for path, t in frames:
         text = pytesseract.image_to_string(Image.open(path)).strip()
+        ocr_map[path] = text
         (ocr_dir / (path.stem + ".txt")).write_text(text)
         if text:
             combined.append(f"### {path.name} (@ {hms(t)})\n{text}\n")
     (frames_dir / "ocr-combined.md").write_text("\n".join(combined) + "\n")
-    return ocr_dir
+    return ocr_map
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +284,24 @@ def contact_sheet(frames, out_path, cols=4, thumb_w=480):
     return out_path
 
 
+def write_timeline(out_dir, kept, segments, ocr_map):
+    """Chronological merge of frames + transcript + OCR. Tolerates missing inputs."""
+    lines = ["# Timeline\n"]
+    n = len(kept)
+    for i, (path, t) in enumerate(kept):
+        next_t = kept[i + 1][1] if i + 1 < n else float("inf")
+        lines.append(f"## {hms(t)}")
+        lines.append(f"![frame](frames/{path.name})")
+        for s, said in segments:
+            if t <= s < next_t:
+                lines.append(f"> {said}")
+        snippet = " ".join((ocr_map.get(path, "") or "").split())[:200]
+        if snippet:
+            lines.append(f"OCR: {snippet}")
+        lines.append("")
+    (out_dir / "timeline.md").write_text("\n".join(lines) + "\n")
+
+
 # ---------------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser(prog="watch-video", description="Video → transcript + key frames for an LLM.")
@@ -294,6 +314,7 @@ def main():
     p.add_argument("--dedupe-distance", type=int, default=6)
     p.add_argument("--no-ocr", action="store_true")
     p.add_argument("--no-contact-sheet", action="store_true")
+    p.add_argument("--no-timeline", action="store_true")
     p.add_argument("--cookies-from-browser")
     p.add_argument("--cookies")
     p.add_argument("--language")
@@ -327,13 +348,18 @@ def main():
     do_ocr = (not args.no_ocr) and have("tesseract")
     if not args.no_ocr and not have("tesseract"):
         eprint("[ocr] tesseract not found — skipping OCR (sudo dnf install tesseract).")
+    ocr_map = {}
     if do_ocr:
         eprint(f"[ocr] reading on-screen text from {len(kept)} frames…")
-        ocr_frames(kept, frames_dir)
+        ocr_map = ocr_frames(kept, frames_dir)
 
     sheet = None
     if not args.no_contact_sheet:
         sheet = contact_sheet(kept, out_dir / "contact-sheet.jpg")
+
+    do_timeline = not args.no_timeline
+    if do_timeline:
+        write_timeline(out_dir, kept, segments, ocr_map)
 
     # SUMMARY.md — the entry point an agent reads first
     lines = [
@@ -345,11 +371,13 @@ def main():
         f"- **Transcript:** {n_seg} segments, language `{lang}`",
         f"- **OCR:** {'yes → frames/ocr-combined.md' if do_ocr else 'no'}",
         f"- **Contact sheet:** {'contact-sheet.jpg' if sheet else 'none'}",
+        f"- **Timeline:** {'yes → timeline.md' if do_timeline else 'no'}",
         "",
         "## How to read this (for an LLM/agent)",
-        "1. Read `transcript.md` for what was said (timestamped).",
-        "2. Skim `contact-sheet.jpg`, then open individual `frames/*.jpg` for detail.",
-        "3. For exact on-screen numbers, cross-check `frames/ocr-combined.md` against the frame image"
+        "0. Read this SUMMARY, then read the files it lists below (skip any not present).",
+        "1. `timeline.md` interleaves each frame with what was said + on-screen text — read this first.",
+        "2. `transcript.md` for the full timestamped transcript.",
+        "3. Open individual `frames/*.jpg`; cross-check exact numbers against `frames/ocr-combined.md`"
         " (OCR can misread; the image is ground truth).",
         "",
         "> ⚠️ This folder may contain private/financial client data — do not commit it.",
