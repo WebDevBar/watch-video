@@ -2,8 +2,9 @@
 
 **Give a coding agent the ability to "watch" a video — entirely on your own machine.**
 
-`watch-video` turns a **Loom**, any video URL, or a local file into artifacts an LLM
-agent can actually read:
+`watch-video` turns a **Loom**, a **YouTube / Vimeo / TikTok / Instagram / X** link (or
+any of the [~1000+ sites `yt-dlp` supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)),
+or a **local file** into artifacts an LLM agent can actually read:
 
 - a **timestamped transcript** (local Whisper),
 - a **deduplicated set of key frames** (so static screencasts don't waste tokens),
@@ -139,15 +140,22 @@ Anthropic's servers, so the video **leaves your machine** — use the web surfac
 **As a CLI:**
 
 ```bash
-# a public URL or local file
+# a local file
 ./watch-video ./demo.mp4
 
-# a private/team Loom (reads your browser cookies locally)
+# a public URL (YouTube, Vimeo, etc. — anything yt-dlp supports)
+./watch-video "https://www.youtube.com/watch?v=XXXX"
+
+# a private/team Loom or any login-gated source (reads your browser cookies locally)
 ./watch-video https://www.loom.com/share/XXXX --cookies-from-browser firefox
 
 # denser sampling + sharper OCR for a number-heavy dashboard recording
 ./watch-video ./dashboard.mp4 --periodic 2 --ocr-tuned
 ```
+
+**Sources:** local files, **Loom**, **YouTube**, **Vimeo**, **TikTok**, **Instagram**,
+**X/Twitter**, and any other site [`yt-dlp` supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
+Login-gated or private videos need `--cookies-from-browser <browser>` (or `--cookies cookies.txt`).
 
 Output lands in `./watch-video-out/<slug>/` (override with `--out`). The CLI prints the
 path to `SUMMARY.md` on stdout; everything else goes to stderr.
