@@ -9,3 +9,7 @@ watch-video-out/
 __pycache__/
 *.pyc
 dist/
+
+# Internal process artifacts (specs/plans) — not part of the release
+docs/superpowers/
+docs/PACKAGING.md

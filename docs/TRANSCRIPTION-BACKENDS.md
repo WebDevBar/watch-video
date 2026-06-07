@@ -12,8 +12,7 @@ videos; a multi-minute Loom transcribes in well under real-time on a modern CPU.
   (CTranslate2) has **no ROCm or Metal** path — it runs CPU-only on AMD/Mac.
   For GPU there, swap the backend to **`whisper.cpp` with Vulkan** (works on AMD
   RDNA, Intel, NVIDIA) or Metal (Apple). This is why the backend is kept
-  isolated in `transcribe()` — it's a drop-in swap, not a rewrite. (This machine
-  is AMD RDNA4 → CPU now, whisper.cpp+Vulkan is the future GPU path.)
+  isolated in `transcribe()` — it's a drop-in swap, not a rewrite. (On AMD/Apple today the pipeline runs on CPU; whisper.cpp+Vulkan/Metal is the GPU path.)
 
 ## Why this is isolated
 
