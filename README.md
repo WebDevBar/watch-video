@@ -87,6 +87,8 @@ its root). In Claude Code:
 (or `/plugin marketplace add /path/to/watch-video` for a local clone). Then invoke the
 namespaced command on any video:
 
+> Non-interactive equivalents (handy for scripting/CI): `claude plugin marketplace add webdevbar/watch-video` then `claude plugin install watch-video@watch-video`; `claude plugin validate .` checks the manifests.
+
 ```
 /watch-video:watch https://www.loom.com/share/XXXX
 /watch-video:watch ./recording.mp4 --no-ocr

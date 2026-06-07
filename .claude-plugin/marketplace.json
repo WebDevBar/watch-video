@@ -1,6 +1,11 @@
 {
   "name": "watch-video",
-  "owner": {"name": "webdevbar"},
+  "owner": {
+    "name": "webdevbar"
+  },
+  "metadata": {
+    "description": "watch-video - turn a Loom/URL/local video into a transcript + deduped key frames + OCR for a coding agent. Local-first."
+  },
   "plugins": [
     {
       "name": "watch-video",
