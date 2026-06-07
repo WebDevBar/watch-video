@@ -58,6 +58,10 @@ Claude Code skill/plugin so the agent invokes it and gets frames + transcript
 directly in-context, reusing the packaging two existing plugins already solved
 while keeping our OCR + faster-whisper + dedupe edge.
 
+## Plugin form
+
+Installable as a Claude Code / Codex skill. Install deps with `python3 scripts/setup.py`, then invoke the namespaced `/watch-video:watch` command (wraps `scripts/watch-run.py`). claude.ai web: non-sensitive/public videos only (hosted sandbox). See `SKILL.md`.
+
 ## Docs
 
 - [`docs/WHY.md`](docs/WHY.md) — why this exists (privacy, Loom-native,

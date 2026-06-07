@@ -1,0 +1,15 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build skill bundle
+        run: bash scripts/build-skill.sh dist/watch.skill
+      - name: Attach bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/watch.skill
