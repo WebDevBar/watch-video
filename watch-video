@@ -109,7 +109,7 @@ def acquire(source, out_dir, cookies_from_browser, cookies_file):
     local = Path(source).expanduser()
     if local.exists() and local.is_file():
         eprint(f"[acquire] local file: {local}")
-        return local
+        return local, False
 
     if not have("yt-dlp"):
         sys.exit("ERROR: yt-dlp not found. Install with: uv tool install yt-dlp")
@@ -132,7 +132,7 @@ def acquire(source, out_dir, cookies_from_browser, cookies_file):
     mp4s = sorted(out_dir.glob("source.*"))
     if not mp4s:
         sys.exit("ERROR: yt-dlp produced no file (private link needs --cookies-from-browser?).")
-    return mp4s[0]
+    return mp4s[0], True
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +396,20 @@ def do_clean(clean_arg, older_than, base):
     return targets, skipped
 
 
+def prune_source(video, was_downloaded):
+    """Delete the source video ONLY if watch-video downloaded it. Never deletes a
+    user-provided local input. Returns True if it deleted something."""
+    if not was_downloaded:
+        return False
+    try:
+        Path(video).unlink(missing_ok=True)
+        eprint(f"[no-source] removed downloaded source {video}")
+        return True
+    except Exception as e:
+        eprint(f"[no-source] could not remove source: {e}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser(prog="watch-video", description="Video → transcript + key frames for an LLM.")
@@ -413,6 +427,7 @@ def main():
     p.add_argument("--no-ocr", action="store_true")
     p.add_argument("--no-contact-sheet", action="store_true")
     p.add_argument("--no-timeline", action="store_true")
+    p.add_argument("--no-source", action="store_true")
     p.add_argument("--cookies-from-browser")
     p.add_argument("--cookies")
     p.add_argument("--language")
@@ -440,7 +455,7 @@ def main():
     dir_was_ours = is_watch_video_dir(out_dir)   # validates the manifest signature, not just presence
     write_manifest(out_dir, args.source)
 
-    video = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
+    video, was_downloaded = acquire(args.source, out_dir, args.cookies_from_browser, args.cookies)
     dur = duration_seconds(video)
 
     do_transcribe = not args.no_transcribe
@@ -504,6 +519,9 @@ def main():
     for path, t in kept:
         lines.append(f"- `frames/{path.name}` @ {hms(t)}")
     (out_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
+
+    if args.no_source:
+        prune_source(video, was_downloaded)
 
     eprint(f"\n[done] {out_dir}/SUMMARY.md")
     print(str(out_dir / "SUMMARY.md"))
