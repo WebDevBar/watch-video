@@ -55,14 +55,24 @@ WATCH_VIDEO_VERSION = "1.1.0"
 
 
 def write_manifest(out_dir, source):
-    """Write the hidden ownership marker every cleanup operation validates."""
+    """Write the hidden ownership marker every cleanup operation validates.
+    Preserves an existing valid manifest's `created` so re-runs don't reset run age."""
+    mf = out_dir / ".watch-video.json"
+    created = None
+    if mf.is_file():
+        try:
+            old = json.loads(mf.read_text())
+            if old.get("tool") == "watch-video":
+                created = old.get("created")
+        except Exception:
+            created = None
     manifest = {
         "tool": "watch-video",
         "version": WATCH_VIDEO_VERSION,
         "source": str(source),
-        "created": datetime.now(timezone.utc).isoformat(),
+        "created": created or datetime.now(timezone.utc).isoformat(),
     }
-    (out_dir / ".watch-video.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    mf.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 def is_watch_video_dir(path):
@@ -169,7 +179,10 @@ def extract_frames(video, frames_dir, periodic, scene_threshold):
         )
     # map each emitted frame (in order) to its pts_time from showinfo
     times = [float(m) for m in re.findall(r"pts_time:([0-9.]+)", info_log.read_text())]
+    info_log.unlink(missing_ok=True)
     frames = sorted(frames_dir.glob("[0-9]*.jpg"))
+    if len(times) != len(frames):
+        eprint(f"[frames] WARNING: showinfo emitted {len(times)} timestamps for {len(frames)} frames; extra frames get t=0.0")
     return list(zip(frames, times + [0.0] * (len(frames) - len(times))))
 
 
@@ -200,8 +213,10 @@ def dedupe(frame_times, distance, max_frames):
         last_hash = h
     # enforce cap by uniform thinning (keep first/last, sample the middle)
     if len(kept) > max_frames:
-        step = len(kept) / max_frames
-        idx = sorted({0, len(kept) - 1, *(int(i * step) for i in range(max_frames))})
+        if max_frames <= 1:
+            idx = [0]
+        else:
+            idx = sorted({round(i * (len(kept) - 1) / (max_frames - 1)) for i in range(max_frames)})
         keepset = {kept[i][0] for i in idx}
         for path, _ in kept:
             if path not in keepset:
@@ -376,7 +391,23 @@ def remove_wv_artifacts(d):
         s.unlink(missing_ok=True)
     frames = d / "frames"
     if frames.exists():
-        shutil.rmtree(frames, ignore_errors=True)   # frames/ is entirely watch-video-created
+        (frames / "ocr-combined.md").unlink(missing_ok=True)
+        (frames / "_showinfo.txt").unlink(missing_ok=True)
+        ocr_dir = frames / "ocr"
+        if ocr_dir.exists():
+            for f in ocr_dir.glob("*.txt"):
+                f.unlink(missing_ok=True)
+            try:
+                ocr_dir.rmdir()
+            except OSError:
+                pass
+        for pattern in ("frame_*.jpg", "[0-9][0-9][0-9][0-9][0-9][0-9].jpg"):
+            for f in frames.glob(pattern):
+                f.unlink(missing_ok=True)
+        try:
+            frames.rmdir()   # remove frames/ only if now empty — user's own files survive
+        except OSError:
+            pass
     try:
         d.rmdir()                      # removes the folder ONLY if nothing else remains
         return True

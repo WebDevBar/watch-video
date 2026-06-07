@@ -14,4 +14,14 @@ test -f "$OUT/SUMMARY.md" || { echo "FAIL: run produced no SUMMARY"; exit 1; }
 # Cleanup pass-through removes the manifested dir.
 python3 "$WRAP" --clean "$OUT" >/dev/null 2>&1
 test ! -d "$OUT" || { echo "FAIL: cleanup pass-through did not delete"; exit 1; }
+# bare --out (no slash) must produce an ABSOLUTE path
+cd "$TMP"
+BARE_DIR="$(python3 "$WRAP" "$CLIP" --out bareout --no-transcribe 2>/dev/null)"
+case "$BARE_DIR" in
+    /*) ;;  # starts with / — absolute path, good
+    *)  echo "FAIL: wrapper bare-out '$BARE_DIR' is not absolute"; exit 1 ;;
+esac
+# cleanup via wrapper must remove the dir
+python3 "$WRAP" --clean "$BARE_DIR" >/dev/null 2>&1
+test ! -d "$TMP/bareout" || { echo "FAIL: bare-out dir not cleaned"; exit 1; }
 echo "PASS wrapper"

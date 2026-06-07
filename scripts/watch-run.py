@@ -22,7 +22,7 @@ def run_cli(extra_args, default_ocr_tuned):
     summary_line = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout.strip() else ""
     if not summary_line:
         sys.exit("watch-run: CLI produced no output path")
-    return str(Path(summary_line).parent)
+    return str(Path(summary_line).parent.resolve())
 
 
 def run_cleanup(clean_args):
